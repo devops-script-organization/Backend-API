@@ -59,7 +59,11 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{secrets.USERNAME}}
           password: ${{ secrets.PASSWORD }}
-          script: whoami
+          script: | 
+            cd /home/user/devops-script/backend/dev
+            sudo docker compose pull backend-api
+            sudo docker compose down backend-api
+            sudo docker compose up -d
 
 
       
