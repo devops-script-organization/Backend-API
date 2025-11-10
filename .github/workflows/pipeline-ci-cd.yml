@@ -1,74 +1,232 @@
 name: Back End Deployment
-on :
+
+on:
   push:
-     branches:
-        - main
+    branches: [ main ]
 
 env:
-  BUILD_NUMBER: ${{github.run_number}}
-  IMAGE_NAME: ${{vars.DOCKERHUB_USERNAME}}/api-session14
-  PROJECT_PATH: /home/user/devops-script/backend/dev  #Docker compose path
+  BUILD_NUMBER: ${{ github.run_number }}
+  IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/api-session14
+  PROJECT_PATH: /home/user/devops-script/backend/dev
   DOCKER_SERVICE: backend-api
 
 jobs:
-  # Unit Test
-  Unit-Test:
+  Unit_Test:
     runs-on: ubuntu-latest
-    steps: 
-        - name: checkout code
-          uses: actions/checkout@v5
-
-        - name: Install Dependencies
-          run: npm i
-
-        - name: run unit Test
-          run: npm run test
-
-
-  # Build And Push
-  Build_And_Push:
-    runs-on: ubuntu-latest
-    needs: Unit-Test
     steps:
+      - name: Post pipeline start message
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🚀 *GitHub Action Pipeline Started*\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nTriggered by: ${{ github.actor }}\nBuild: #${{ env.BUILD_NUMBER }}"
+      
       - name: checkout code
         uses: actions/checkout@v5
-    
+      
+      - name: Install Dependencies
+        run: npm i
+      
+      - name: Run Unit Test
+        run: npm run test
+      
+      - name: Notify Unit Test completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "✅ *Unit Test*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+
+  sonarqube-code-quality-scan-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify SonarQube scan start
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🔍 *SonarQube Scan Started*\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+      
+      - name: Clone Source Code
+        uses: actions/checkout@v4
+      
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      
+      - name: Notify SonarQube completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "📊 *SonarQube Scan*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+
+  trivy-image-security-scan-job:
+    needs: [Unit_Test, sonarqube-code-quality-scan-job]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Trivy scan start
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🛡️ *Trivy Security Scan Started*\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+      
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y curl
+      
+      - name: Download and install Trivy
+        run: |
+          curl -sSL https://github.com/aquasecurity/trivy/releases/download/v0.29.0/trivy_0.29.0_Linux-64bit.tar.gz -o trivy.tar.gz
+          tar xzvf trivy.tar.gz
+          sudo mv trivy /usr/local/bin/
+          trivy --version
+      
+      - name: Run Trivy Docker image vulnerability scan
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }} .
+          trivy image ${{ env.IMAGE_NAME }}
+      
+      - name: Notify Trivy completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🔒 *Trivy Security Scan*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+
+  snyk-code-security-scan-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Snyk scan start
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🔐 *Snyk Security Scan Started*\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+      
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Install Dependency Scanning Tool (Snyk)
+        run: npm install -g snyk
+      
+      - name: Snyk Authentication
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+      
+      - name: Run Snyk Vulnerability Scan
+        run: snyk monitor --org=dhouha-lamine --all-projects
+      
+      - name: Notify Snyk completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🛡️ *Snyk Security Scan*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
+
+  Build_And_Push:
+    runs-on: ubuntu-latest
+    needs: [trivy-image-security-scan-job, snyk-code-security-scan-job]
+    steps:
+      - name: Notify build start
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🏗️ *Docker Build & Push Started*\nRepository: ${{ github.repository }}\nImage: ${{ env.IMAGE_NAME }}\nBuild: #${{ env.BUILD_NUMBER }}"
+      
+      - name: checkout code
+        uses: actions/checkout@v5
+      
       - name: Build Docker Image
-        run: docker build -t ${{env.IMAGE_NAME}} .
-
+        run: docker build -t ${{ env.IMAGE_NAME }} .
+      
       - name: Tag Docker Image with version
-        run: docker tag ${{env.IMAGE_NAME}} ${{env.IMAGE_NAME}}:v${{env.BUILD_NUMBER}}
-
+        run: docker tag ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:v${{ env.BUILD_NUMBER }}
+      
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
+      
       - name: List Images
         run: docker images
-
-      - name: Push Docker images
-        run: docker push ${{env.IMAGE_NAME}}
-
+      
+      - name: Push Docker image
+        run: docker push ${{ env.IMAGE_NAME }}
+      
       - name: push version image
-        run: docker push ${{env.IMAGE_NAME}}:v${{env.BUILD_NUMBER}}
+        run: docker push ${{ env.IMAGE_NAME }}:v${{ env.BUILD_NUMBER }}
+      
+      - name: Notify build completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "✅ *Docker Build & Push*: ${{ job.status }}\nRepository: ${{ github.repository }}\nImage: ${{ env.IMAGE_NAME }}:v${{ env.BUILD_NUMBER }}\nBuild: #${{ env.BUILD_NUMBER }}"
 
-  # Deployment 
   Deployment:
     runs-on: ubuntu-latest
     needs: Build_And_Push
     steps:
-      - name: ssh connect and deploy
+      - name: Notify deployment start
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🚀 *Deployment Started*\nRepository: ${{ github.repository }}\nEnvironment: Production\nBuild: #${{ env.BUILD_NUMBER }}"
+      
+      - name: SSH Connect And Deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HOST }}
-          username: ${{secrets.USERNAME}}
+          username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
-          script: | 
-            cd ${{env.PROJECT_PATH}}
-            sudo docker compose -p session14 pull ${{env.DOCKER_SERVICE}}
-            sudo docker compose -p session14 up -d ${{env.DOCKER_SERVICE}}
-
-
+          script: |
+            cd ${{ env.PROJECT_PATH }}
+            sudo docker compose pull ${{ env.DOCKER_SERVICE }}
+            sudo docker compose down ${{ env.DOCKER_SERVICE }}
+            sudo docker compose up -d
       
+      - name: Notify deployment completion
+        if: always()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🎉 *Deployment*: ${{ job.status }}\nRepository: ${{ github.repository }}\nEnvironment: Production\nBuild: #${{ env.BUILD_NUMBER }}\nDeployed to: ${{ secrets.HOST }}"
+
+  Pipeline_Completion:
+    runs-on: ubuntu-latest
+    needs: [Unit_Test, sonarqube-code-quality-scan-job, trivy-image-security-scan-job, snyk-code-security-scan-job, Build_And_Push, Deployment]
+    if: always()
+    steps:
+      - name: Notify final pipeline status
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "🏁 *Pipeline Completed*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}\nOverall Status: ${{ job.status }}"
