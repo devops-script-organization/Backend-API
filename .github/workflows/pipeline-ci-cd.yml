@@ -41,7 +41,7 @@ jobs:
             text: "✅ *Unit Test*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
 
   sonarqube-code-quality-scan-job:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Change de windows-latest à ubuntu-latest
     steps:
       - name: Notify SonarQube scan start
         uses: slackapi/slack-github-action@v2.1.1
@@ -51,11 +51,13 @@ jobs:
           payload: |
             text: "🔍 *SonarQube Scan Started*\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
       
-      - name: Clone Source Code
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Important pour SonarQube
       
       - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
+        uses: SonarSource/sonarqube-scan-action@v6  # Version v6 comme recommandé
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -68,7 +70,6 @@ jobs:
           webhook-type: incoming-webhook
           payload: |
             text: "📊 *SonarQube Scan*: ${{ job.status }}\nRepository: ${{ github.repository }}\nBuild: #${{ env.BUILD_NUMBER }}"
-
   trivy-image-security-scan-job:
     needs: [Unit_Test, sonarqube-code-quality-scan-job]
     runs-on: ubuntu-latest
