@@ -204,11 +204,10 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
-          script: |
-            cd ${{ env.PROJECT_PATH }}
-            sudo docker compose pull ${{ env.DOCKER_SERVICE }}
-            sudo docker compose down ${{ env.DOCKER_SERVICE }}
-            sudo docker compose up -d
+          script: | 
+            cd ${{env.PROJECT_PATH}}
+            sudo docker compose -p session14 pull ${{env.DOCKER_SERVICE}}
+            sudo docker compose -p session14 up -d ${{env.DOCKER_SERVICE}}
       
       - name: Notify deployment completion
         if: always()
